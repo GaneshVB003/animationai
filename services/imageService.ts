@@ -126,8 +126,14 @@ export const generateAnimationFrames = async (
                 // Last frame: Conclude the motion, referencing the previous frame.
                 currentFramePrompt = `${styleInstruction} This is the **final frame** of a ${frameCount}-frame animation of "${motionPrompt}". Using the provided image as the immediate previous frame, create the **absolute conclusion** of the motion. The action should be fully completed and settled.`;
             } else {
-                // Intermediate frames: Show gradual progression from the previous frame.
-                currentFramePrompt = `${styleInstruction} This is frame ${i} of ${frameCount} for the animation of "${motionPrompt}". Using the provided image as the immediate previous frame, create the very next moment in the sequence. Show a subtle, logical progression of the action.`;
+                // Intermediate frames: Use deep logic to create purposeful movement.
+                currentFramePrompt = `${styleInstruction} This is frame ${i} of a ${frameCount}-frame animation of "${motionPrompt}".
+
+**CRITICAL INSTRUCTION FOR AN EXPERT ANIMATOR:** Your task is to generate the very next logical step in the action, using the provided image as the immediate previous frame. The movement MUST be clear, purposeful, and dynamic—avoiding any static or idle appearance.
+
+1.  **Analyze Motion Arc:** Deconstruct the core action: "${motionPrompt}". Consider the physics, momentum, and the primary arc of movement.
+2.  **Calculate Next Pose:** For this specific frame, advance the subject's pose significantly. Think in terms of angles, trigonometry, and kinetics. For instance, if a character is "drawing a sword," calculate the new angle of the elbow, the rotation of the shoulder, and the precise new position of the hand and blade.
+3.  **Generate with Precision:** Create a frame that flawlessly illustrates this calculated next step. The progression from the previous frame must be obvious, smooth, and contribute meaningfully to the overall animation's energy and flow.`;
             }
             
             const nextFrame = await generateFrame(ai, currentFramePrompt, previousFrame);
