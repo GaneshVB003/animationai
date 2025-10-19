@@ -1,0 +1,5 @@
+{
+  "name": "AI Image Generator",
+  "description": "A simple web application to generate images from text prompts using the OpenRouter API.",
+  "requestFramePermissions": []
+}
