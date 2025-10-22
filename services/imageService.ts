@@ -90,9 +90,101 @@ const generateFrame = async (ai: GoogleGenAI, prompt: string, referenceFrameB64?
 
 
 /**
+ * Generates a detailed, frame-by-frame storyboard for an animation.
+ * This is the "logic" phase where the entire motion is planned out with deep analysis.
+ * @param ai - The initialized GoogleGenAI client.
+ * @param motionPrompt - A prompt describing an action or motion.
+ * @param frameCount - The number of frames to generate.
+ * @returns A promise that resolves to an array of strings, where each string is a detailed prompt for a frame.
+ */
+const generateStoryboard = async (ai: GoogleGenAI, motionPrompt: string, frameCount: number): Promise<string[]> => {
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-pro",
+            contents: `You are an expert animator, physicist, and kinesiologist. Your task is to perform a deep analysis of a motion concept and break it down into a series of distinct keyframes for a ${frameCount}-frame animation. You will generate a detailed, frame-by-frame script. For each frame, you must provide both technical notes analyzing the motion and a descriptive prompt for an AI image generator.
+
+**DEEP ANALYSIS RULES:**
+1.  **Establish a 3D Scene:** Imagine the scene in three dimensions. Define the subject's initial position and the camera's viewpoint.
+2.  **Deconstruct the Motion:**
+    *   **Primary Motion:** Identify the main arc of movement (e.g., the path of a sword swing).
+    *   **Secondary Motion:** Analyze overlapping actions and follow-through (e.g., the rotation of the torso, the shift in body weight).
+    *   **Physics & Kinesiology:** Consider gravity, momentum, inertia, and realistic body mechanics. How does the body shift to maintain balance? What muscles are engaged?
+3.  **Frame-by-Frame Breakdown:** For each frame, provide:
+    *   **Technical Notes:** A bullet-point list of the precise changes from the *previous* frame. Use quantitative data: angles in degrees, positions on an imaginary X/Y/Z grid, and percentages of completion for the overall motion. Describe the physics at play. This is your private "animator's notes".
+    *   **Frame Description:** A vivid, descriptive prompt for the AI image generator. This description should be the culmination of your technical analysis, translated into artistic language. It must clearly state the subject's pose and the state of the action.
+
+**OUTPUT FORMAT:**
+You must provide a JSON object with a single key "storyboard". The value of "storyboard" must be an array of objects, with each object representing one frame. The array must contain exactly ${frameCount} elements. Each object must have two keys: 'technical_notes' and 'frame_description'.
+
+**Motion Concept:** "${motionPrompt}"`,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        storyboard: {
+                            type: Type.ARRAY,
+                            description: `An array of exactly ${frameCount} objects, where each object represents one frame.`,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    technical_notes: {
+                                        type: Type.STRING,
+                                        description: "Animator's technical analysis of the frame's motion, physics, and changes from the previous frame. Use quantitative details."
+                                    },
+                                    frame_description: {
+                                        type: Type.STRING,
+                                        description: "A vivid, descriptive prompt for an AI image generator, based on the technical analysis."
+                                    }
+                                },
+                                required: ['technical_notes', 'frame_description']
+                            }
+                        }
+                    },
+                    required: ['storyboard']
+                },
+            },
+        });
+
+        const responseText = response.text.trim();
+        const parsedJson = JSON.parse(responseText);
+        
+        interface StoryboardFrame {
+            technical_notes: string;
+            frame_description: string;
+        }
+
+        const storyboardFrames: StoryboardFrame[] = parsedJson.storyboard;
+
+
+        if (!Array.isArray(storyboardFrames) || storyboardFrames.length !== frameCount) {
+            console.error('AI storyboard response:', storyboardFrames);
+            throw new Error(`Storyboard generation failed: AI returned an invalid format or wrong number of frames. Expected ${frameCount}, got ${storyboardFrames.length || 'none'}.`);
+        }
+        
+        const frameDescriptions = storyboardFrames.map(frame => {
+            if (typeof frame.frame_description !== 'string' || !frame.frame_description) {
+                 throw new Error('Storyboard generation failed: A frame description was missing or not a string.');
+            }
+            return frame.frame_description;
+        });
+
+        return frameDescriptions;
+
+    } catch (error) {
+        console.error("Storyboard Generation Error:", error);
+        if (error instanceof Error && error.message.includes('JSON.parse')) {
+             throw new Error("Failed to generate animation storyboard. The planning AI returned an invalid JSON format.");
+        }
+        throw new Error("Failed to generate animation storyboard. The planning AI may be experiencing issues.");
+    }
+};
+
+
+/**
  * Generates a specified number of animation frames from a single motion prompt.
- * This function uses a sequential, frame-by-frame generation method with specific prompts
- * for the start and end frames to ensure a well-defined animation arc.
+ * This function first generates a detailed storyboard (the "deep logic") and then
+ * executes that storyboard frame by frame to create the animation.
  * @param motionPrompt - A prompt describing an action or motion.
  * @param frameCount - The number of frames to generate.
  * @param onProgress - A callback function to report progress updates.
@@ -112,28 +204,25 @@ export const generateAnimationFrames = async (
     }
 
     try {
+        onProgress?.('Analyzing motion and creating storyboard...');
+        const storyboard = await generateStoryboard(ai, motionPrompt, frameCount);
+        onProgress?.('Storyboard created. Starting frame generation...');
+
         let previousFrame: string | undefined = undefined;
 
-        for (let i = 1; i <= frameCount; i++) {
-            onProgress?.(`Generating frame ${i} of ${frameCount}...`);
+        for (let i = 0; i < frameCount; i++) {
+            const frameIndex = i + 1;
+            onProgress?.(`Generating frame ${frameIndex} of ${frameCount}...`);
 
+            const storyboardPrompt = storyboard[i];
             let currentFramePrompt = '';
 
-            if (i === 1) {
-                // First frame: Establish the scene from scratch.
-                currentFramePrompt = `${styleInstruction} This is the **first frame** of a ${frameCount}-frame animation. Depict the **absolute beginning** of the motion: "${motionPrompt}". The scene should be static, right before the main action starts.`;
-            } else if (i === frameCount && frameCount > 1) {
-                // Last frame: Conclude the motion, referencing the previous frame.
-                currentFramePrompt = `${styleInstruction} This is the **final frame** of a ${frameCount}-frame animation of "${motionPrompt}". Using the provided image as the immediate previous frame, create the **absolute conclusion** of the motion. The action should be fully completed and settled.`;
+            if (i === 0) {
+                // First frame: Establish the scene from scratch using the storyboard's direction.
+                currentFramePrompt = `${styleInstruction} This is the **first frame** of a ${frameCount}-frame animation. The detailed instruction for this frame is: "${storyboardPrompt}".`;
             } else {
-                // Intermediate frames: Use deep logic to create purposeful movement.
-                currentFramePrompt = `${styleInstruction} This is frame ${i} of a ${frameCount}-frame animation of "${motionPrompt}".
-
-**CRITICAL INSTRUCTION FOR AN EXPERT ANIMATOR:** Your task is to generate the very next logical step in the action, using the provided image as the immediate previous frame. The movement MUST be clear, purposeful, and dynamic—avoiding any static or idle appearance.
-
-1.  **Analyze Motion Arc:** Deconstruct the core action: "${motionPrompt}". Consider the physics, momentum, and the primary arc of movement.
-2.  **Calculate Next Pose:** For this specific frame, advance the subject's pose significantly. Think in terms of angles, trigonometry, and kinetics. For instance, if a character is "drawing a sword," calculate the new angle of the elbow, the rotation of the shoulder, and the precise new position of the hand and blade.
-3.  **Generate with Precision:** Create a frame that flawlessly illustrates this calculated next step. The progression from the previous frame must be obvious, smooth, and contribute meaningfully to the overall animation's energy and flow.`;
+                // Subsequent frames: Use the previous frame as a reference and apply the storyboard's instruction.
+                currentFramePrompt = `${styleInstruction} This is frame ${frameIndex} of a ${frameCount}-frame animation. Using the provided image as the immediate previous frame, generate the very next logical step in the action. The precise instruction for this frame is: "${storyboardPrompt}". Ensure the transition is smooth and physically plausible.`;
             }
             
             const nextFrame = await generateFrame(ai, currentFramePrompt, previousFrame);
